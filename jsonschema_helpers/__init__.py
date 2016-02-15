@@ -45,3 +45,59 @@ def simpleschema(simple_schema_override=None):
     def simpleschema_closure(f):
         return SimpleSchemaFunction(f, simple_schema_override)
     return simpleschema_closure
+
+
+class AutoSchemaFunction(object):
+    def __init__(self, function, simple_schema_override=None):
+        '''
+        Interpret dictionary keyword argument default values as
+        jsonschema schema property.
+        '''
+        self.function = function
+        self.argspec = inspect.getargspec(function)
+
+        self.args_count = len(self.argspec.args)
+        self.default_count = len(self.argspec.defaults)
+        self.required_count = self.args_count - self.default_count
+
+        # Fill in "empty" schema definitions for args or kwargs not
+        # present in user-defined schema (if any).
+        simple_schema = dict([(k, {})
+                              for i, k in enumerate(self.argspec.args)])
+
+        for i, k in enumerate(self.argspec.args[self.required_count:]):
+            if isinstance(self.argspec.defaults[i], dict):
+                simple_schema[k] = self.argspec.defaults[i]
+            else:
+                simple_schema[k]['default'] = self.argspec.defaults[i]
+
+        if simple_schema_override:
+            simple_schema.update(simple_schema_override)
+
+        self.schema = {'type': 'object',
+                       'properties': simple_schema,
+                       'required': self.argspec.args,
+                       'additionalProperties':
+                       (self.argspec.keywords is not None)}
+
+    def __call__(self, *args, **kwargs):
+        named_args = OrderedDict(zip(self.argspec.args, args))
+        default_args = self.argspec.args[max(self.required_count, len(args)):]
+        defaults = OrderedDict()
+        for k in default_args:
+            if k not in named_args and k not in kwargs:
+                if 'default' not in self.schema['properties'][k]:
+                    raise KeyError('`%s` is a required argument.' % k)
+                else:
+                    defaults[k] = self.schema['properties'][k]['default']
+        named_args.update(defaults)
+        named_args.update(kwargs)
+
+        jsonschema.validate(named_args, self.schema)
+        return self.function(*named_args.values()[:self.args_count], **kwargs)
+
+
+def autoschema(simple_schema_override=None):
+    def simpleschema_closure(f):
+        return AutoSchemaFunction(f, simple_schema_override)
+    return simpleschema_closure
