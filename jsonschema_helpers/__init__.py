@@ -33,7 +33,33 @@ class DecoratorMixin(object):
         return DecoratorMethod(self, instance)
 
 
-class SimpleSchemaFunction(DecoratorMixin):
+class SchemaMixin(object):
+    def __call__(self, *args, **kwargs):
+        unnamed_count = len(self.unnamed_args)
+        if self.argspec.varargs is None and (len(args) > unnamed_count +
+                                             len(self.args)):
+            raise TypeError('%s() takes at most %d positional arguments.' %
+                            (self.function.func_name, len(self.args)))
+        positional_args = dict(zip(self.args, args[unnamed_count:]))
+
+        named_args = OrderedDict()
+        for k in self.args:
+            if k in positional_args:
+                named_args[k] = positional_args[k]
+            elif k in kwargs:
+                named_args[k] = kwargs.pop(k)
+            elif 'default' in self.schema['properties'][k]:
+                named_args[k] = self.schema['properties'][k]['default']
+            else:
+                raise KeyError('`%s` is a required argument.' % k)
+
+        jsonschema.validate(named_args, self.schema)
+        return self.function(*(list(args[:unnamed_count]) +
+                               named_args.values()[:self.args_count]),
+                             **kwargs)
+
+
+class SimpleSchemaFunction(SchemaMixin, DecoratorMixin):
     # Need to inherit from `DecoratorMixin` to support decorating methods.
     # If `DecoratorMixin` is not used, decorated methods will not be passed
     # instance as first argument.  See [here][1] for more information.
@@ -90,18 +116,6 @@ class SimpleSchemaFunction(DecoratorMixin):
             self.schema['required'] = self.args
         functools.update_wrapper(self, function)
 
-    def __call__(self, *args, **kwargs):
-        unnamed_count = len(self.unnamed_args)
-        named_args = OrderedDict(zip(self.args, args[unnamed_count:]))
-        defaults = OrderedDict([(k, self.schema['properties'][k]['default'])
-                                for k in self.args[len(args):]])
-        named_args.update(defaults)
-        named_args.update(kwargs)
-        jsonschema.validate(named_args, self.schema)
-        return self.function(*(list(args[:unnamed_count]) +
-                               named_args.values()[:self.args_count]),
-                             **kwargs)
-
 
 def simpleschema(simple_schema_override=None):
     def simpleschema_closure(f):
@@ -109,7 +123,7 @@ def simpleschema(simple_schema_override=None):
     return simpleschema_closure
 
 
-class AutoSchemaFunction(DecoratorMixin):
+class AutoSchemaFunction(SchemaMixin, DecoratorMixin):
     # Need to inherit from `DecoratorMixin` to support decorating methods.
     # If `DecoratorMixin` is not used, decorated methods will not be passed
     # instance as first argument.  See [here][1] for more information.
@@ -171,25 +185,6 @@ class AutoSchemaFunction(DecoratorMixin):
         if self.args:
             self.schema['required'] = self.args
         functools.update_wrapper(self, function)
-
-    def __call__(self, *args, **kwargs):
-        unnamed_count = len(self.unnamed_args)
-        named_args = OrderedDict(zip(self.args, args[unnamed_count:]))
-        default_args = self.args[max(self.required_count, len(args)):]
-        defaults = OrderedDict()
-        for k in default_args:
-            if k not in named_args and k not in kwargs:
-                if 'default' not in self.schema['properties'][k]:
-                    raise KeyError('`%s` is a required argument.' % k)
-                else:
-                    defaults[k] = self.schema['properties'][k]['default']
-        named_args.update(defaults)
-        named_args.update(kwargs)
-
-        jsonschema.validate(named_args, self.schema)
-        return self.function(*(list(args[:unnamed_count]) +
-                               named_args.values()[:self.args_count]),
-                             **kwargs)
 
 
 def autoschema(simple_schema_override=None):
