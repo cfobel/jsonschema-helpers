@@ -52,6 +52,7 @@ class SchemaMixin(object):
                 named_args[k] = self.schema['properties'][k]['default']
             else:
                 raise KeyError('`%s` is a required argument.' % k)
+        named_args.update(kwargs)
 
         jsonschema.validate(named_args, self.schema)
         return self.function(*(list(args[:unnamed_count]) +
@@ -102,13 +103,15 @@ class SimpleSchemaFunction(SchemaMixin, DecoratorMixin):
 
         self.schema = self.create_schema(self.args, self.defaults,
                                          self.required_count,
-                                         (self.argspec.keywords is not None))
+                                         (self.argspec.keywords is not None),
+                                         override=simple_schema_override)
 
         if self.args:
             self.schema['required'] = self.args
         functools.update_wrapper(self, function)
 
-    def create_schema(self, args, defaults, required_count, additional_kwargs, override=None):
+    def create_schema(self, args, defaults, required_count, additional_kwargs,
+                      override=None):
         # Fill in "empty" schema definitions for args or kwargs not
         # present in user-defined schema (if any).
         simple_schema = dict([(k, {}) for i, k in enumerate(args)])
