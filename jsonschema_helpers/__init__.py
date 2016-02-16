@@ -127,6 +127,16 @@ class SimpleSchemaFunction(SchemaMixin, DecoratorMixin):
 
 
 def simpleschema(simple_schema_override=None):
-    def simpleschema_closure(f):
-        return SimpleSchemaFunction(f, simple_schema_override)
-    return simpleschema_closure
+    if callable(simple_schema_override):
+        # Assume `simpleschema` used as a decorator with no call brackets.
+        #
+        #     @simpleschema
+        #     def foo():
+        #         ...
+        function = simple_schema_override
+        return SimpleSchemaFunction(function)
+    else:
+        # Assume `simpleschema` used as a decorator with call brackets.
+        def simpleschema_closure(function):
+            return SimpleSchemaFunction(function, simple_schema_override)
+        return simpleschema_closure
